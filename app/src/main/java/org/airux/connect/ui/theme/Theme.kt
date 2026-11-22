@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -47,8 +49,10 @@ fun AiroxTheme(content: @Composable () -> Unit) {
             onSurfaceVariant = Ax.muted, outline = Ax.line, error = Ax.red, surfaceContainer = Ax.panel,
             surfaceContainerHigh = Color(0xFF172230), surfaceContainerHighest = Color(0xFF1B2836),
         ),
-        content = content,
-    )
+    ) {
+        // the default text colour for every screen, also those outside a Scaffold (pairing, sharing)
+        CompositionLocalProvider(LocalContentColor provides Ax.text, content = content)
+    }
 }
 
 @Composable

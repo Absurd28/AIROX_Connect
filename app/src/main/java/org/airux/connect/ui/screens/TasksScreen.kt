@@ -164,8 +164,9 @@ private fun Performance() {
                 Row { SectionTitle("CPU", Modifier.weight(1f)); Text("${cpu.optDouble("util").toInt()}%", color = Ax.blue) }
                 Muted(cpu.optString("model"), size = 12)
                 Sparkline(cpu.optJSONArray("history").doubles(), Ax.blue, Modifier.fillMaxWidth().padding(top = 8.dp))
-                Muted("${cpu.optInt("count")} logical processors · ${cpu.optInt("mhz").takeIf { it > 0 }?.let { "%.2f GHz".format(it / 1000.0) } ?: ""} · " +
-                    "${cpu.optInt("procs")} processes", Modifier.padding(top = 6.dp), 12)
+                Muted(listOfNotNull("${cpu.optInt("count")} logical processors",
+                    cpu.optInt("mhz").takeIf { it > 0 }?.let { "%.2f GHz".format(it / 1000.0) },
+                    cpu.optInt("procs").takeIf { it > 0 }?.let { "$it processes" }).joinToString(" · "), Modifier.padding(top = 6.dp), 12)
             }
         }
         val mem = d.optJSONObject("memory") ?: JSONObject()
