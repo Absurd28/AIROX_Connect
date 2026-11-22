@@ -10,6 +10,7 @@ The Android app for [AIRUX](https://github.com/Absurd28/AIRUX_OS): talk to **AIR
 Research Assistant*), see and manage what your PC is running, move files both ways, and turn your phone
 or tablet into a touchpad or a **second screen**, all over your own network.
 
+<a href="https://github.com/Absurd28/AIROX_Connect/actions/workflows/ci.yml"><img src="https://github.com/Absurd28/AIROX_Connect/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
 <img src="https://img.shields.io/badge/Android-10%2B-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android 10+"/>
 <img src="https://img.shields.io/badge/Kotlin-2.1-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"/>
 <img src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose"/>
@@ -145,6 +146,48 @@ result on the PC.
 adb shell am instrument -w -e notClass org.airux.connect.E2E,org.airux.connect.Tour,org.airux.connect.StrongConfirm \
     org.airux.connect.test/androidx.test.runner.AndroidJUnitRunner
 ```
+
+On every push and pull request, [CI](.github/workflows/ci.yml) builds the debug APK, runs lint and runs
+`UnitTests.kt` on an Android 14 emulator.
+
+## 🚀 Releasing
+
+Releases are built and signed by [release.yml](.github/workflows/release.yml) when you push a `v*` tag.
+The signing key is yours: it is never in this repository.
+
+1. **Once, create the key** (keep the file and both passwords safe: every later version must be signed
+   with the same key, or phones can't update):
+
+   ```sh
+   keytool -genkeypair -v -keystore airox-release.jks -alias airox -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+2. **Once, add four secrets** under the repo's **Settings → Secrets and variables → Actions**:
+
+   | Secret | Value |
+   | --- | --- |
+   | `AIROX_KEYSTORE_B64` | the keystore as base64: `base64 -w0 airox-release.jks` (Linux) or `[Convert]::ToBase64String([IO.File]::ReadAllBytes("airox-release.jks"))` (PowerShell) |
+   | `AIROX_KEYSTORE_PASSWORD` | the keystore password |
+   | `AIROX_KEY_ALIAS` | `airox` |
+   | `AIROX_KEY_PASSWORD` | the key password |
+
+3. **Each release:** raise `versionCode` and set `versionName` in `app/build.gradle.kts`, commit, then
+
+   ```sh
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+   The tag must be `v` + `versionName`. The workflow stops if a secret is missing (it never ships a
+   debug-signed APK), verifies the signature, publishes `airox-connect-X.Y.Z.apk` and its `.sha256`, and
+   prints the size and SHA-256 for the website's `site.json`.
+
+To sign a release build locally, set `AIROX_KEYSTORE` (the file's path), `AIROX_KEYSTORE_PASSWORD`,
+`AIROX_KEY_ALIAS` and `AIROX_KEY_PASSWORD` and run `./gradlew assembleRelease`. Without them the release
+APK is unsigned.
+
+> **Coming from 0.1.0?** That preview was signed with a debug key, so Android won't update it to a
+> release-signed version. Uninstall it once, install the new APK and pair again. Later updates install
+> over the top.
 
 ## 🗂️ Project layout
 

@@ -17,6 +17,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing comes only from the environment (set by .github/workflows/release.yml).
+    // Without all four variables the release APK stays unsigned. Never commit a key.
+    val releaseKeystore = providers.environmentVariable("AIROX_KEYSTORE").orNull
+    val releaseStorePassword = providers.environmentVariable("AIROX_KEYSTORE_PASSWORD").orNull
+    val releaseKeyAlias = providers.environmentVariable("AIROX_KEY_ALIAS").orNull
+    val releaseKeyPassword = providers.environmentVariable("AIROX_KEY_PASSWORD").orNull
+    val canSignRelease = listOf(releaseKeystore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+        .all { !it.isNullOrBlank() }
+
+    signingConfigs {
+        if (canSignRelease) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ""
@@ -24,6 +44,9 @@ android {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (canSignRelease) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

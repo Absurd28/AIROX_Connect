@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # A release must be signed with the release key. There is no debug-signed fallback: a different
+      # key would stop phones from updating.
+      - name: Check the signing secrets
+        env:
+          AIROX_KEYSTORE_B64: ${{ secrets.AIROX_KEYSTORE_B64 }}
+          AIROX_KEYSTORE_PASSWORD: ${{ secrets.AIROX_KEYSTORE_PASSWORD }}
+          AIROX_KEY_ALIAS: ${{ secrets.AIROX_KEY_ALIAS }}
+          AIROX_KEY_PASSWORD: ${{ secrets.AIROX_KEY_PASSWORD }}
+        run: |
+          missing=""
+          for name in AIROX_KEYSTORE_B64 AIROX_KEYSTORE_PASSWORD AIROX_KEY_ALIAS AIROX_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing signing secrets::Add these under Settings > Secrets and variables > Actions:$missing (see README, Releasing). No APK was built."
+            exit 1
+          fi
+          echo "All four signing secrets are set."
+
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches versionName
+        id: version
+        run: |
+          version=$(sed -n 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read versionName from app/build.gradle.kts"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error title=Tag and version differ::Tag is $GITHUB_REF_NAME but versionName is $version. Tag v$version, or change versionName (and versionCode) first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
+
+      - name: Decode the keystore
+        env:
+          AIROX_KEYSTORE_B64: ${{ secrets.AIROX_KEYSTORE_B64 }}
+        run: |
+          printf '%s' "$AIROX_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/airox-release.jks"
+          if [ ! -s "$RUNNER_TEMP/airox-release.jks" ]; then
+            echo "::error::AIROX_KEYSTORE_B64 did not decode to a keystore"
+            exit 1
+          fi
+
+      - name: Build the signed release APK
+        env:
+          AIROX_KEYSTORE_PASSWORD: ${{ secrets.AIROX_KEYSTORE_PASSWORD }}
+          AIROX_KEY_ALIAS: ${{ secrets.AIROX_KEY_ALIAS }}
+          AIROX_KEY_PASSWORD: ${{ secrets.AIROX_KEY_PASSWORD }}
+        run: AIROX_KEYSTORE="$RUNNER_TEMP/airox-release.jks" ./gradlew assembleRelease
+
+      - name: Verify the signature
+        id: apk
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          src=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$src" ]; then
+            echo "::error::$src is missing; the release build was not signed"
+            ls -l app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+          build_tools=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)
+          apksigner="$ANDROID_HOME/build-tools/$build_tools/apksigner"
+          "$apksigner" verify --verbose --print-certs "$src" | tee "$RUNNER_TEMP/apksigner.txt"
+          if grep -q 'CN=Android Debug' "$RUNNER_TEMP/apksigner.txt"; then
+            echo "::error::The APK is signed with a debug key"
+            exit 1
+          fi
+          mkdir -p dist
+          name="airox-connect-$VERSION.apk"
+          cp "$src" "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/$NAME" "dist/$NAME.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "AIROX Connect $VERSION" --generate-notes
+
+      - name: Size and SHA-256 for the website's site.json
+        env:
+          NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          size=$(stat -c %s "dist/$NAME")
+          sha=$(cut -d ' ' -f 1 "dist/$NAME.sha256")
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$NAME"
+          echo "file:   $NAME"
+          echo "bytes:  $size"
+          echo "sha256: $sha"
+          echo "url:    $url"
+          snippet=$(printf '"file": "%s",\n"url": "%s",\n"bytes": %s,\n"sha256": "%s"' "$NAME" "$url" "$size" "$sha")
+          echo ""
+          echo "For site.json (downloads entry):"
+          echo "$snippet"
+          {
+            echo "### $NAME"
+            echo ""
+            echo "For the website's \`site.json\` (the \`downloads\` entry):"
+            echo ""
+            echo '```json'
+            echo "$snippet"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/airox-release.jks"
